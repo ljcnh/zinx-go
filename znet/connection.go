@@ -1,6 +1,7 @@
 package znet
 
 import (
+	"github.com/ljcnh/zinx-go"
 	"github.com/ljcnh/zinx-go/ziface"
 	"log"
 	"net"
@@ -35,7 +36,7 @@ func (c *Connection) StartRead() {
 	defer log.Printf("connId = %d, Reader is exit,Remote addr is: %s\n", c.ConnId, c.RemoteAddr().String())
 	defer c.Stop()
 	for {
-		buf := make([]byte, 512)
+		buf := make([]byte, zinx_go.GlobalObject.MaxPackageSize)
 		_, err := c.Conn.Read(buf)
 		if err != nil {
 			log.Printf("Reading buf err: %v \n", err)
