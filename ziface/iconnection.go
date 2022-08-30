@@ -8,7 +8,7 @@ type IConnection interface {
 	GetTCPConnection() *net.TCPConn
 	GetConnId() uint32
 	RemoteAddr() net.Addr
-	Send([]byte) error
+	SendMsg(uint32, []byte) error
 }
 
 // HandleFunc TcpConn 内容 处理的长度

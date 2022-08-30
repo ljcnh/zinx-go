@@ -1,8 +1,9 @@
 package znet
 
 import (
-	"github.com/ljcnh/zinx-go"
+	"errors"
 	"github.com/ljcnh/zinx-go/ziface"
+	"io"
 	"log"
 	"net"
 )
@@ -36,16 +37,35 @@ func (c *Connection) StartRead() {
 	defer log.Printf("connId = %d, Reader is exit,Remote addr is: %s\n", c.ConnId, c.RemoteAddr().String())
 	defer c.Stop()
 	for {
-		buf := make([]byte, zinx_go.GlobalObject.MaxPackageSize)
-		_, err := c.Conn.Read(buf)
+
+		dp := NewDataPack()
+		headData := make([]byte, dp.GetHeadLen())
+		_, err := io.ReadFull(c.GetTCPConnection(), headData)
 		if err != nil {
-			log.Printf("Reading buf err: %v \n", err)
+			log.Printf("Read msg head data err: %v\n", err)
 			break
 		}
+
+		msg, err := dp.UnPack(headData)
+		if err != nil {
+			log.Printf("UnPack msg data err: %v\n", err)
+			break
+		}
+		data := make([]byte, 0)
+		if msg.GetMsgLen() > 0 {
+			data = make([]byte, msg.GetMsgLen())
+			if _, err := io.ReadFull(c.GetTCPConnection(), data); err != nil {
+				log.Printf("Recv msg data err: %v\n", err)
+				break
+			}
+		}
+		msg.SetData(data)
+
 		req := &Request{
 			conn: c,
-			data: buf,
+			msg:  msg,
 		}
+
 		go func(req ziface.IRequest) {
 			c.Router.PreHandle(req)
 			c.Router.Handle(req)
@@ -67,6 +87,7 @@ func (c *Connection) Stop() {
 func (c *Connection) GetTCPConnection() *net.TCPConn {
 	return c.Conn
 }
+
 func (c *Connection) GetConnId() uint32 {
 	return c.ConnId
 }
@@ -74,6 +95,27 @@ func (c *Connection) GetConnId() uint32 {
 func (c *Connection) RemoteAddr() net.Addr {
 	return c.Conn.RemoteAddr()
 }
-func (c *Connection) Send([]byte) error {
+
+func (c *Connection) SendMsg(msgId uint32, data []byte) error {
+	if c.isClosed {
+		return errors.New("connection closed when sen msg")
+	}
+
+	dp := NewDataPack()
+
+	msg := NewMessage(msgId, data)
+
+	finalData, err := dp.Pack(msg)
+	if err != nil {
+		log.Printf("pack error msg id= %d\n", msgId)
+		return errors.New("pack error msg")
+	}
+
+	_, err = c.Conn.Write(finalData)
+	if err != nil {
+		log.Printf("write msg id= %d\n, err= %v", msgId, err)
+		return errors.New("conn write error")
+	}
+
 	return nil
 }

@@ -9,7 +9,7 @@ import (
 // ping test
 
 type PingRouter struct {
-	ziface.IRouter
+	znet.BaseRouter
 }
 
 func (p *PingRouter) PreHandle(req ziface.IRequest) {
