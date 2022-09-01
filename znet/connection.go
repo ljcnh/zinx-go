@@ -9,32 +9,34 @@ import (
 )
 
 type Connection struct {
-	Conn     *net.TCPConn
-	ConnId   uint32
-	isClosed bool
-	ExitCh   chan bool
-	Router   ziface.IRouter
+	Conn       *net.TCPConn
+	ConnId     uint32
+	isClosed   bool
+	ExitCh     chan bool
+	msgCh      chan []byte
+	MsgHandler ziface.IMsgHandler
 }
 
-func NewConnection(conn *net.TCPConn, ConnId uint32, router ziface.IRouter) *Connection {
+func NewConnection(conn *net.TCPConn, ConnId uint32, msgHandler ziface.IMsgHandler) *Connection {
 	return &Connection{
-		Conn:     conn,
-		ConnId:   ConnId,
-		isClosed: false,
-		Router:   router,
-		ExitCh:   make(chan bool, 1),
+		Conn:       conn,
+		ConnId:     ConnId,
+		isClosed:   false,
+		MsgHandler: msgHandler,
+		msgCh:      make(chan []byte),
+		ExitCh:     make(chan bool, 1),
 	}
 }
 
 func (c *Connection) Start() {
 	log.Printf("Conn Start... ConnId=%d\n", c.ConnId)
 	go c.StartRead()
-	//  TODO
+	go c.StartWriter()
 }
 
 func (c *Connection) StartRead() {
-	log.Printf("Reading is running...\n")
-	defer log.Printf("connId = %d, Reader is exit,Remote addr is: %s\n", c.ConnId, c.RemoteAddr().String())
+	log.Printf("Reading Gortine is running...\n")
+	defer log.Printf("Reader is exit, connId = %d, Remote addr is: %s\n", c.ConnId, c.RemoteAddr().String())
 	defer c.Stop()
 	for {
 
@@ -66,11 +68,23 @@ func (c *Connection) StartRead() {
 			msg:  msg,
 		}
 
-		go func(req ziface.IRequest) {
-			c.Router.PreHandle(req)
-			c.Router.Handle(req)
-			c.Router.PostHandle(req)
-		}(req)
+		go c.MsgHandler.DoMsgHandler(req)
+	}
+}
+
+func (c *Connection) StartWriter() {
+	log.Printf("Write Gortine is running...\n")
+	defer log.Printf("[conn Writer exit]: %s \n", c.RemoteAddr().String())
+	for {
+		select {
+		case data := <-c.msgCh:
+			if _, err := c.Conn.Write(data); err != nil {
+				log.Printf("Send data error: %v \n", err)
+				return
+			}
+		case <-c.ExitCh:
+			return
+		}
 	}
 }
 
@@ -81,7 +95,8 @@ func (c *Connection) Stop() {
 	}
 	c.isClosed = true
 	c.Conn.Close()
-	close(c.ExitCh)
+	c.ExitCh <- true
+	close(c.msgCh)
 }
 
 func (c *Connection) GetTCPConnection() *net.TCPConn {
@@ -110,12 +125,6 @@ func (c *Connection) SendMsg(msgId uint32, data []byte) error {
 		log.Printf("pack error msg id= %d\n", msgId)
 		return errors.New("pack error msg")
 	}
-
-	_, err = c.Conn.Write(finalData)
-	if err != nil {
-		log.Printf("write msg id= %d\n, err= %v", msgId, err)
-		return errors.New("conn write error")
-	}
-
+	c.msgCh <- finalData
 	return nil
 }
