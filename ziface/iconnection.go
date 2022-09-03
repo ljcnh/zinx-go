@@ -1,6 +1,8 @@
 package ziface
 
-import "net"
+import (
+	"net"
+)
 
 type IConnection interface {
 	Start()
@@ -9,6 +11,9 @@ type IConnection interface {
 	GetConnId() uint32
 	RemoteAddr() net.Addr
 	SendMsg(uint32, []byte) error
+	SetProperty(string, interface{})
+	GetProperty(string) (interface{}, error)
+	RemoveProperty(string)
 }
 
 // HandleFunc TcpConn 内容 处理的长度

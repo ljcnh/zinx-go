@@ -2,36 +2,46 @@ package znet
 
 import (
 	"errors"
+	zinx_go "github.com/ljcnh/zinx-go"
 	"github.com/ljcnh/zinx-go/ziface"
 	"io"
 	"log"
 	"net"
+	"sync"
 )
 
 type Connection struct {
+	Server     ziface.IServer
 	Conn       *net.TCPConn
 	ConnId     uint32
 	isClosed   bool
 	ExitCh     chan bool
 	msgCh      chan []byte
 	MsgHandler ziface.IMsgHandler
+	property   map[string]interface{}
+	propertyRW sync.RWMutex
 }
 
-func NewConnection(conn *net.TCPConn, ConnId uint32, msgHandler ziface.IMsgHandler) *Connection {
-	return &Connection{
+func NewConnection(server ziface.IServer, conn *net.TCPConn, ConnId uint32, msgHandler ziface.IMsgHandler) *Connection {
+	c := &Connection{
+		Server:     server,
 		Conn:       conn,
 		ConnId:     ConnId,
 		isClosed:   false,
 		MsgHandler: msgHandler,
 		msgCh:      make(chan []byte),
 		ExitCh:     make(chan bool, 1),
+		property:   make(map[string]interface{}),
 	}
+	c.Server.GetConnMgr().Add(c)
+	return c
 }
 
 func (c *Connection) Start() {
 	log.Printf("Conn Start... ConnId=%d\n", c.ConnId)
 	go c.StartRead()
 	go c.StartWriter()
+	c.Server.CallConnStart(c)
 }
 
 func (c *Connection) StartRead() {
@@ -68,7 +78,11 @@ func (c *Connection) StartRead() {
 			msg:  msg,
 		}
 
-		go c.MsgHandler.DoMsgHandler(req)
+		if zinx_go.GlobalObject.WorkerPollSize > 0 {
+			c.MsgHandler.SendMsgToTaskQueue(req)
+		} else {
+			go c.MsgHandler.DoMsgHandler(req)
+		}
 	}
 }
 
@@ -94,9 +108,16 @@ func (c *Connection) Stop() {
 		return
 	}
 	c.isClosed = true
+
+	c.Server.CallConnStop(c)
+
 	c.Conn.Close()
 	c.ExitCh <- true
+
+	c.Server.GetConnMgr().Remove(c)
+
 	close(c.msgCh)
+	close(c.ExitCh)
 }
 
 func (c *Connection) GetTCPConnection() *net.TCPConn {
@@ -127,4 +148,25 @@ func (c *Connection) SendMsg(msgId uint32, data []byte) error {
 	}
 	c.msgCh <- finalData
 	return nil
+}
+
+func (c *Connection) SetProperty(key string, val interface{}) {
+	c.propertyRW.Lock()
+	defer c.propertyRW.Unlock()
+	c.property[key] = val
+}
+
+func (c *Connection) GetProperty(key string) (interface{}, error) {
+	c.propertyRW.RLock()
+	defer c.propertyRW.RUnlock()
+	if val, ok := c.property[key]; ok {
+		return val, nil
+	}
+	return nil, errors.New("no Property Found")
+}
+
+func (c *Connection) RemoveProperty(key string) {
+	c.propertyRW.Lock()
+	defer c.propertyRW.Unlock()
+	delete(c.property, key)
 }
